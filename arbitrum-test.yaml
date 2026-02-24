@@ -1,0 +1,15 @@
+paths:
+  work: /mnt/nvme2/overlay
+  outputs: ./outputs
+
+scenarios:
+  arbitrum-test:
+    client: arbitrum-nethermind
+    network: arbitrum
+    payloads: /home/ubuntu/paylaods/payloads.jsonl
+    snapshot_source: /mnt/nvme3/snapshots_unpacked/neth/
+    snapshot_backend: overlay
+    image: nethermind.jfrog.io/core-oci-local-dev/nethermind-arbitrum:20260216-80c30ef
+    amount: 100
+    duration: 2m
+    startup_wait: 60

@@ -23,7 +23,7 @@ class ArbitrumNethermindConfig(ClientConfig):
                 f"--JsonRpc.Port={CLIENT_RPC_PORT}",
                 "--Init.WebSocketsEnabled=true",
                 f"--JsonRpc.WebSocketsPort={CLIENT_RPC_WS_PORT}",
-                "--JsonRpc.EnabledModules=Eth,Subscribe,Trace,TxPool,Web3,Personal,Proof,Net,Parity,Health,Rpc,Debug,Admin",
+                "--JsonRpc.EnabledModules=Eth,Subscribe,Trace,TxPool,Web3,Personal,Proof,Net,Parity,Health,Rpc,Debug,Admin,NitroExecution",
                 "--Metrics.Enabled=true",
                 f"--Metrics.ExposePort={CLIENT_METRICS_PORT}",
                 "--Metrics.ExposeHost=0.0.0.0",

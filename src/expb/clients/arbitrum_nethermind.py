@@ -30,6 +30,13 @@ class ArbitrumNethermindConfig(ClientConfig):
                 # Disable peering
                 "--Init.DiscoveryEnabled=false",
                 "--Network.MaxActivePeers=0",
+                # Disable sync (replay only)
+                "--Sync.SnapSync=false",
+                "--Sync.FastSync=false",
+                # Disable auth (Arbitrum uses standard RPC, not Engine API)
+                "--JsonRpc.UnsecureDevNoRpcAuthentication=true",
+                # Disable snapshots
+                "--Snapshot.Enabled=false",
             ],
             prometheus_metrics_path="/metrics",
             default_env={},
@@ -47,7 +54,7 @@ class ArbitrumNethermindConfig(ClientConfig):
         if network == Network.ARBITRUM:
             command.extend(
                 [
-                    "--config=arbitrum",
+                    "--config=arbitrum-mainnet",
                 ]
             )
         return self.default_command + command + extra_flags

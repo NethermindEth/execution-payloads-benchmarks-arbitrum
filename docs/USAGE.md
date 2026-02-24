@@ -185,7 +185,6 @@ scenarios:
     network: arbitrum              # Enables Arbitrum mode
     payloads: ./payloads.jsonl     # Converted Arbitrum payloads
     # fcus: omitted               # Not used for Arbitrum
-    disable_auth: true             # Optional: skip JWT authentication
     snapshot_source: ./snapshots/arbitrum-nethermind
     amount: 1000
     duration: 30m
@@ -195,6 +194,7 @@ scenarios:
 
 * `network: arbitrum` — disables FCU requirement, uses Arbitrum method handling
 * `fcus` field can be omitted (Arbitrum does not use forkchoice updates)
-* `disable_auth: true` — skips JWT secret generation and Authorization headers (optional)
-* `client: arbitrum-nethermind` — uses Arbitrum-specific Nethermind flags (`--config=arbitrum`)
+* `client: arbitrum-nethermind` — uses Arbitrum-specific Nethermind flags (`--config=arbitrum-mainnet`) with JWT auth disabled automatically
 * Per-payload metrics report `msgDataSize` (base64-decoded L2 message data size) instead of `gasUsed`
+
+For a detailed end-to-end walkthrough, see the [Arbitrum Quickstart](QUICKSTART.md).

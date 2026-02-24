@@ -671,10 +671,20 @@ class Executor:
                 "Running K6",
                 k6_docker_image=self.config.get_k6_container_image(),
             )
-            execution_client_engine_url = self.config.get_execution_client_engine_url(
-                execution_client_container,
-                containers_network,
-            )
+            if self.config.send_fcu:
+                execution_client_engine_url = (
+                    self.config.get_execution_client_engine_url(
+                        execution_client_container,
+                        containers_network,
+                    )
+                )
+            else:
+                execution_client_engine_url = (
+                    self.config.get_execution_client_rpc_url(
+                        execution_client_container,
+                        containers_network,
+                    )
+                )
             enable_k6_logging = (
                 options.print_logs_to_console or options.per_payload_metrics_logs
             )

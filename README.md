@@ -70,7 +70,6 @@ scenarios:
     network: arbitrum
     payloads: ./arbitrum-payloads/payloads.jsonl
     # fcus: omitted (not used for Arbitrum)
-    disable_auth: true
     snapshot_source: ./snapshots/arbitrum-nethermind
     amount: 1000
     duration: 30m
@@ -78,10 +77,10 @@ scenarios:
 ```
 
 Key differences from Ethereum scenarios:
-- `network: arbitrum` — enables Arbitrum mode
-- `fcus` field is omitted (Arbitrum does not use forkchoice updates)
-- `disable_auth: true` — skips JWT authentication (optional, Arbitrum supports JWT but typically runs without it)
-- `client: arbitrum-nethermind` — uses Arbitrum-specific Nethermind configuration
+
+* `network: arbitrum` — enables Arbitrum mode
+* `fcus` field is omitted (Arbitrum does not use forkchoice updates)
+* `client: arbitrum-nethermind` — uses Arbitrum-specific Nethermind configuration (JWT auth is disabled automatically)
 
 #### 3. Run the benchmark
 
@@ -89,7 +88,7 @@ Key differences from Ethereum scenarios:
 expb execute-scenario --scenario-name arbitrum-bench --config-file expb.yaml --per-payload-metrics
 ```
 
-For other use cases or more details see [CLI usage docs](docs/USAGE.md).
+For a detailed walkthrough, see [Arbitrum Quickstart](docs/QUICKSTART.md). For other use cases or more details see [CLI usage docs](docs/USAGE.md).
 
 ## Outputs
 

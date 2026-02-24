@@ -106,3 +106,35 @@ scenarios:
     # Each command will be executed in a separate thread which can affect main process performance when too many commands are executed
     extra_commands:
       - ./extra_command1
+
+  # Arbitrum Nitro scenario example
+  arbitrum-example:
+    # Required: Client type (arbitrum-nethermind for Arbitrum Nitro)
+    client: arbitrum-nethermind
+    # Required: Snapshot source for the Arbitrum Nethermind datadir
+    snapshot_source: ./snapshots/arbitrum-nethermind
+    # Required: Path to the converted Arbitrum payloads (nitroexecution_digestMessage JSONL)
+    payloads: ./arbitrum-payloads.jsonl
+    # Note: No fcus field — Arbitrum does not use forkchoice updates
+    # Required: Network must be arbitrum
+    network: arbitrum
+    # Optional: Snapshot backend. Defaults to overlay
+    snapshot_backend: overlay
+    # Required: Number of payloads to run
+    amount: 100
+    # Optional: Delay between payloads requests in seconds. Defaults to 0 seconds.
+    delay: 0
+    # Optional: Duration of the scenario. Defaults to 10 minutes.
+    duration: 10m
+    # Optional: Number of payloads to skip from the payloads file
+    skip: 0
+    # Optional: Number of payloads to execute as warmup
+    warmup: 0
+    # Optional: Wait time for client startup in seconds. Defaults to 30 seconds.
+    startup_wait: 30
+    # Optional: Client image
+    image: nethermindeth/nethermind:master
+    # Optional: Extra flags for pruning/timeout tuning
+    extra_flags:
+      - --Pruning.Mode=None
+      - --JsonRpc.Timeout=600000

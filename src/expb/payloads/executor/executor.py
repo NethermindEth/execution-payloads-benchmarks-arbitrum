@@ -396,6 +396,7 @@ class Executor:
         return (
             "POST engine_newPayload" in line
             or "POST engine_forkchoiceUpdated" in line
+            or "POST nitroexecution_" in line
             or "EXPB_PER_PAYLOAD_METRIC" in line
         )
 
@@ -567,7 +568,8 @@ class Executor:
             )
             self.clean_system_cache()
             self.prepare_directories()
-            self.prepare_jwt_secret_file()
+            if not self.config.disable_auth:
+                self.prepare_jwt_secret_file()
             if self.config.pull_images:
                 self.pull_docker_images()
 

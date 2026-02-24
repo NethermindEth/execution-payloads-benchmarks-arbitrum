@@ -60,6 +60,8 @@ class ExecutorConfig:
             scenario.extra_volumes
         )
         self.execution_client_extra_commands = scenario.extra_commands
+        self.disable_auth: bool = scenario.disable_auth
+        self.send_fcu: bool = scenario.fcus_file is not None
 
         # Executor Additional Tooling config
         ## Docker client
@@ -85,11 +87,11 @@ class ExecutorConfig:
         # Executor Directories
         ## Payloads and FCUs
         self.payloads_file: Path = scenario.payloads_file
-        self.fcus_file: Path = scenario.fcus_file
+        self.fcus_file: Path | None = scenario.fcus_file
 
         ## Work directories
         self.work_dir: Path = paths.work
-        ### JWT secret file
+        ### JWT secret file (only created when auth is enabled)
         self.jwt_secret_dir: Path = self.work_dir / "jwt-secret"
         self.jwt_secret_file: Path = self.jwt_secret_dir / "jwtsecret.hex"
 
@@ -122,8 +124,12 @@ class ExecutorConfig:
         ### K6 container directories
         self._k6_container_work_dir: str = "/expb"
         self._k6_container_payloads_file: str = f"/payloads/{self.payloads_file.name}"
-        self._k6_container_fcus_file: str = f"/payloads/{self.fcus_file.name}"
-        self._k6_container_jwt_secret_file: str = f"/{self.jwt_secret_file.name}"
+        self._k6_container_fcus_file: str | None = (
+            f"/payloads/{self.fcus_file.name}" if self.fcus_file else None
+        )
+        self._k6_container_jwt_secret_file: str | None = (
+            f"/{self.jwt_secret_file.name}" if not self.disable_auth else None
+        )
         self._k6_container_script_file: str = (
             f"{self._k6_container_work_dir}/{self.k6_script_file.name}"
         )
@@ -255,20 +261,21 @@ class ExecutorConfig:
                 },
             }
         )
-        execution_container_volumes.append(
-            {
-                "bind": CLIENTS_JWT_SECRET_DIR,
-                "config": {
-                    "name": f"{container_name}-jwt-secret",
-                    "driver": "local",
-                    "driver_opts": {
-                        "type": "none",
-                        "o": "bind,rw",
-                        "device": str(self.jwt_secret_dir.resolve()),
+        if not self.disable_auth:
+            execution_container_volumes.append(
+                {
+                    "bind": CLIENTS_JWT_SECRET_DIR,
+                    "config": {
+                        "name": f"{container_name}-jwt-secret",
+                        "driver": "local",
+                        "driver_opts": {
+                            "type": "none",
+                            "o": "bind,rw",
+                            "device": str(self.jwt_secret_dir.resolve()),
+                        },
                     },
-                },
-            }
-        )
+                }
+            )
         return execution_container_volumes
 
     ### Grafana Alloy
@@ -316,17 +323,9 @@ class ExecutorConfig:
         return self.docker_images.k6
 
     def get_k6_volumes(self) -> dict[str, dict[str, str]]:
-        return {
+        volumes = {
             str(self.payloads_file.resolve()): {
                 "bind": self._k6_container_payloads_file,
-                "mode": "rw",
-            },
-            str(self.fcus_file.resolve()): {
-                "bind": self._k6_container_fcus_file,
-                "mode": "rw",
-            },
-            str(self.jwt_secret_file.resolve()): {
-                "bind": self._k6_container_jwt_secret_file,
                 "mode": "rw",
             },
             str(self.outputs_dir.resolve()): {
@@ -334,6 +333,17 @@ class ExecutorConfig:
                 "mode": "rw",
             },
         }
+        if self.fcus_file is not None and self._k6_container_fcus_file is not None:
+            volumes[str(self.fcus_file.resolve())] = {
+                "bind": self._k6_container_fcus_file,
+                "mode": "rw",
+            }
+        if not self.disable_auth and self._k6_container_jwt_secret_file is not None:
+            volumes[str(self.jwt_secret_file.resolve())] = {
+                "bind": self._k6_container_jwt_secret_file,
+                "mode": "rw",
+            }
+        return volumes
 
     def get_k6_environment(self) -> dict[str, str]:
         environment = {}
@@ -368,8 +378,6 @@ class ExecutorConfig:
             f"--tag=testid={self.test_id}",
             f"--env=EXPB_CONFIG_FILE_PATH={self._k6_container_config_file}",
             f"--env=EXPB_PAYLOADS_FILE_PATH={self._k6_container_payloads_file}",
-            f"--env=EXPB_FCUS_FILE_PATH={self._k6_container_fcus_file}",
-            f"--env=EXPB_JWTSECRET_FILE_PATH={self._k6_container_jwt_secret_file}",
             f"--env=EXPB_PAYLOADS_DELAY={self.k6_payloads_delay}",
             f"--env=EXPB_PAYLOADS_WARMUP_DELAY={self.k6_payloads_warmup_delay}",
             f"--env=EXPB_PAYLOADS_SKIP={self.k6_payloads_skip}",
@@ -379,7 +387,13 @@ class ExecutorConfig:
             f"--env=EXPB_ENABLE_LOGGING={int(enable_logging)}",
             f"--env=EXPB_PER_PAYLOAD_METRICS_LOGS={int(per_payload_metrics_logs)}",
             f"--env=EXPB_WARMUP_WAIT={self.k6_warmup_wait}",
+            f"--env=EXPB_SEND_FCU={int(self.send_fcu)}",
+            f"--env=EXPB_USE_JWT={int(not self.disable_auth)}",
         ]
+        if self._k6_container_fcus_file is not None:
+            command.append(f"--env=EXPB_FCUS_FILE_PATH={self._k6_container_fcus_file}")
+        if self._k6_container_jwt_secret_file is not None:
+            command.append(f"--env=EXPB_JWTSECRET_FILE_PATH={self._k6_container_jwt_secret_file}")
         if self.exports is not None and self.exports.prometheus_rw is not None:
             command.append("--out=experimental-prometheus-rw")
             for tag in self.exports.prometheus_rw.tags:

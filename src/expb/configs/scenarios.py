@@ -63,13 +63,18 @@ class Scenario(BaseModel):
         description="Path to the payloads requests.",
         alias="payloads",
     )
-    fcus_file: FilePath = Field(
+    fcus_file: FilePath | None = Field(
         description="Path to the forkchoice updated requests.",
         alias="fcus",
+        default=None,
     )
     network: Network = Field(
-        description="Ethereum network to use for the scenario.",
+        description="Network to use for the scenario.",
         default=Network.MAINNET,
+    )
+    disable_auth: bool = Field(
+        description="Skip JWT authentication when True.",
+        default=False,
     )
     client_image: str | None = Field(
         description="Execution client image.",
@@ -193,6 +198,15 @@ class Scenario(BaseModel):
     def validate_payloads_delays(self):
         if self.payloads_warmup_delay is None:
             self.payloads_warmup_delay = self.payloads_delay
+        return self
+
+    @model_validator(mode="after")
+    def validate_fcus_file(self):
+        if self.fcus_file is None and self.network != Network.ARBITRUM:
+            raise ValueError(
+                f"fcus_file is required for network '{self.network.value.name}'. "
+                "Only Arbitrum scenarios can omit the FCU file."
+            )
         return self
 
 

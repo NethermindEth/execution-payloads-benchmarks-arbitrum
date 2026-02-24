@@ -19,6 +19,7 @@ expb [OPTIONS] COMMAND [ARGS]...
 * `execute-scenarios`: Execute payloads for multiple execution clients using Grafana K6.
 * `compress-payloads`: Compress execution payloads transactions for a given block range into bigger blocks.
 * `send-payloads`: Send payloads to an Ethereum Execution Engine endpoint.
+* `convert-arbitrum-payloads`: Convert recorded Arbitrum Nitro RPC files into benchmark JSONL format.
 
 ## `expb generate-payloads`
 
@@ -33,7 +34,7 @@ expb generate-payloads [OPTIONS]
 **Options**:
 
 * `--rpc-url TEXT`: Ethereum RPC URL  [required]
-* `--network [mainnet]`: Network  [default: mainnet]
+* `--network [mainnet|arbitrum]`: Network  [default: mainnet]
 * `--start-block INTEGER`: Start block  [default: 0]
 * `--end-block INTEGER`: End block
 * `--output-dir PATH`: Output directory  [default: payloads]
@@ -100,7 +101,7 @@ expb compress-payloads [OPTIONS]
 * `--nethermind-docker-image TEXT`: Nethermind docker image  [required]
 * `--input-payloads-file PATH`: Input payloads jsonl file  [required]
 * `--output-payloads-dir PATH`: Output directory to use for compressed payloads and forkchoice messages  [required]
-* `--network [mainnet]`: Network  [default: mainnet]
+* `--network [mainnet|arbitrum]`: Network  [default: mainnet]
 * `--compression-factor INTEGER`: Compress factor  [default: 2]
 * `--target-gas-limit INTEGER`: Target Gas limit for compressed blocks  [default: 4000000000]
 * `--cpu-count INTEGER`: CPU count for the Nethermind container  [default: 4]
@@ -127,3 +128,73 @@ expb send-payloads [OPTIONS]
 * `--jwt-secret-file PATH`: JWT secret file  [required]
 * `--log-level TEXT`: Log level (e.g., DEBUG, INFO, WARNING)  [default: INFO]
 * `--help`: Show this message and exit.
+
+## `expb convert-arbitrum-payloads`
+
+Convert recorded Arbitrum Nitro RPC traffic files (`rpc.<N>.txt`) into the benchmark JSONL format.
+
+**Usage**:
+
+```console
+expb convert-arbitrum-payloads [OPTIONS]
+```
+
+**Options**:
+
+* `--input-dir PATH`: Directory containing `rpc.<N>.txt` files  [required]
+* `--output-dir PATH`: Directory for output `payloads.jsonl`  [required]
+* `--start-block INTEGER`: First file index to process (inclusive)  [default: 0]
+* `--end-block INTEGER`: Last file index to process (inclusive)
+* `--methods TEXT`: Comma-separated list of method suffixes to include  [default: digestMessage]
+* `--log-level TEXT`: Log level  [default: INFO]
+* `--help`: Show this message and exit.
+
+**Exit codes**:
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Input directory does not exist or contains no matching files |
+| 2 | Output file already exists (refuses to overwrite) |
+
+**Example**:
+
+```bash
+# Convert the first 100 recorded RPC files
+expb convert-arbitrum-payloads \
+  --input-dir ~/rpc \
+  --output-dir ./arbitrum-payloads \
+  --start-block 0 \
+  --end-block 99
+
+# Include all Nitro methods (not just digestMessage)
+expb convert-arbitrum-payloads \
+  --input-dir ~/rpc \
+  --output-dir ./arbitrum-payloads \
+  --methods "digestMessage,headMessageIndex,setConsensusSyncData,resultAtMessageIndex"
+```
+
+## Arbitrum Scenario Configuration
+
+Arbitrum scenarios use the same `execute-scenario` / `execute-scenarios` commands but with different YAML configuration:
+
+```yaml
+scenarios:
+  arbitrum-bench:
+    client: arbitrum-nethermind    # Arbitrum-specific client config
+    network: arbitrum              # Enables Arbitrum mode
+    payloads: ./payloads.jsonl     # Converted Arbitrum payloads
+    # fcus: omitted               # Not used for Arbitrum
+    disable_auth: true             # Optional: skip JWT authentication
+    snapshot_source: ./snapshots/arbitrum-nethermind
+    amount: 1000
+    duration: 30m
+```
+
+**Key differences from Ethereum scenarios**:
+
+* `network: arbitrum` — disables FCU requirement, uses Arbitrum method handling
+* `fcus` field can be omitted (Arbitrum does not use forkchoice updates)
+* `disable_auth: true` — skips JWT secret generation and Authorization headers (optional)
+* `client: arbitrum-nethermind` — uses Arbitrum-specific Nethermind flags (`--config=arbitrum`)
+* Per-payload metrics report `msgDataSize` (base64-decoded L2 message data size) instead of `gasUsed`

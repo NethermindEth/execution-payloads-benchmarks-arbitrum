@@ -87,6 +87,10 @@ class Network(Enum):
             Fork.OSAKA: 1764798551,
         },
     )
+    ARBITRUM = NetworkConfig(
+        name="arbitrum",
+        forks_timestamps={},
+    )
 
     @classmethod
     def from_name(cls, name: str) -> "Network":

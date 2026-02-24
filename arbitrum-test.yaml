@@ -12,4 +12,4 @@ scenarios:
     image: nethermind.jfrog.io/core-oci-local-dev/nethermind-arbitrum:20260216-80c30ef
     amount: 100
     duration: 2m
-    startup_wait: 60
+    startup_wait: 180

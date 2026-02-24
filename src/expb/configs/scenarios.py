@@ -209,6 +209,12 @@ class Scenario(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def validate_arbitrum_auth(self):
+        if self.network == Network.ARBITRUM:
+            self.disable_auth = True
+        return self
+
 
 class ScenariosPaths(BaseModel):
     work: Path = Field(

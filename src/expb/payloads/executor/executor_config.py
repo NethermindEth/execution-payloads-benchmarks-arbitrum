@@ -121,6 +121,7 @@ class ExecutorConfig:
         ## K6 script and config files
         self.k6_script_file: Path = self.outputs_dir / "k6-script.js"
         self.k6_config_file: Path = self.outputs_dir / "k6-config.json"
+        self.k6_payloads_file: Path = self.outputs_dir / "k6-payloads.jsonl"
         ### K6 container directories
         self._k6_container_work_dir: str = "/expb"
         self._k6_container_payloads_file: str = f"/payloads/{self.payloads_file.name}"
@@ -324,7 +325,7 @@ class ExecutorConfig:
 
     def get_k6_volumes(self) -> dict[str, dict[str, str]]:
         volumes = {
-            str(self.payloads_file.resolve()): {
+            str(self.k6_payloads_file.resolve()): {
                 "bind": self._k6_container_payloads_file,
                 "mode": "rw",
             },
@@ -380,7 +381,7 @@ class ExecutorConfig:
             f"--env=EXPB_PAYLOADS_FILE_PATH={self._k6_container_payloads_file}",
             f"--env=EXPB_PAYLOADS_DELAY={self.k6_payloads_delay}",
             f"--env=EXPB_PAYLOADS_WARMUP_DELAY={self.k6_payloads_warmup_delay or 0}",
-            f"--env=EXPB_PAYLOADS_SKIP={self.k6_payloads_skip or 0}",
+            f"--env=EXPB_PAYLOADS_SKIP=0",
             f"--env=EXPB_PAYLOADS_WARMUP={self.k6_payloads_warmup or 0}",
             f"--env=EXPB_ENGINE_ENDPOINT={execution_client_engine_url}",
             f"--env=EXPB_PER_PAYLOAD_METRICS={int(collect_per_payload_metrics)}",

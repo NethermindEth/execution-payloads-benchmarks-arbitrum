@@ -247,6 +247,34 @@ class Executor:
         return alloy_container
 
     # Grafana K6 Setup
+    def prepare_k6_payloads(self) -> None:
+        """Pre-slice the payloads file to only include the lines K6 needs."""
+        skip = self.config.k6_payloads_skip or 0
+        warmup = self.config.k6_payloads_warmup or 0
+        amount = self.config.k6_payloads_amount
+        total_needed = skip + warmup + amount
+
+        self.log.info(
+            "Preparing K6 payloads",
+            source=str(self.config.payloads_file),
+            total_lines_to_extract=total_needed,
+            skip=skip,
+            warmup=warmup,
+            amount=amount,
+        )
+
+        with open(self.config.payloads_file, "r") as src, \
+             open(self.config.k6_payloads_file, "w") as dst:
+            for i, line in enumerate(src):
+                if i >= total_needed:
+                    break
+                dst.write(line)
+
+        self.log.info(
+            "K6 payloads prepared",
+            output=str(self.config.k6_payloads_file),
+        )
+
     def prepare_k6_script(self) -> None:
         # Create k6 script file
         self.config.k6_script_file.touch(mode=0o666, exist_ok=True)
@@ -663,6 +691,9 @@ class Executor:
 
             # Start extra commands in parallel
             self.start_extra_commands(execution_client_container)
+
+            self.log.info("Preparing K6 payloads")
+            self.prepare_k6_payloads()
 
             self.log.info("Preparing K6 script")
             self.prepare_k6_script()

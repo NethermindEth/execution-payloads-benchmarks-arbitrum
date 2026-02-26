@@ -44,6 +44,8 @@ class ArbitrumNitroConfig(ClientConfig):
                 "--http.api=net,web3,eth,arb,nitroexecution",
                 # Logging
                 "--log-level=INFO",
+                # Disable auth
+                "--auth.addr="
             ],
             prometheus_metrics_path="/metrics",
             default_env={},

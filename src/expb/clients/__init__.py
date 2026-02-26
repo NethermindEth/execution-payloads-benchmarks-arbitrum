@@ -1,6 +1,7 @@
 from enum import Enum
 
 from expb.clients.arbitrum_nethermind import ArbitrumNethermindConfig
+from expb.clients.arbitrum_nitro import ArbitrumNitroConfig
 from expb.clients.besu import BesuConfig
 from expb.clients.client_config import (
     CLIENT_ENGINE_PORT,
@@ -30,6 +31,7 @@ class Client(Enum):
     ETHREX = EthrexConfig()
     NIMBUSEL = NimbusELConfig()
     ARBITRUM_NETHERMIND = ArbitrumNethermindConfig()
+    ARBITRUM_NITRO = ArbitrumNitroConfig()
 
     @classmethod
     def from_name(cls, name: str) -> "Client":

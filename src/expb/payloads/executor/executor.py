@@ -131,6 +131,7 @@ class Executor:
         # Run execution container
         cpu_count = self.config.resources.cpu if self.config.resources else None
         mem_limit = self.config.resources.mem if self.config.resources else None
+        entrypoint = self.config.execution_client.value.default_entrypoint
         container = self.config.docker_client.containers.run(
             image=self.config.execution_client_image,
             name=self.config.get_execution_client_container_name(),
@@ -138,6 +139,7 @@ class Executor:
             ports=execution_container_ports,
             command=execution_container_command,
             environment=execution_container_environment,
+            entrypoint=entrypoint,
             network=container_network.name if container_network else None,
             detach=True,
             restart_policy={"Name": "unless-stopped"},

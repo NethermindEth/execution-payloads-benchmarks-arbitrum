@@ -1,6 +1,6 @@
 # Arbitrum Nitro Benchmarking — Quickstart
 
-This guide walks through the full workflow for benchmarking an Arbitrum Nethermind execution client: recording RPC traffic, converting payloads, and running a benchmark scenario.
+This guide walks through the full workflow for benchmarking Arbitrum execution clients (`arbitrum-nethermind` or `arbitrum-nitro`): recording RPC traffic, converting payloads, and running a benchmark scenario.
 
 ## Prerequisites
 
@@ -53,13 +53,15 @@ expb convert-arbitrum-payloads \
 
 ## Step 3: Prepare a Snapshot
 
-The `snapshot_source` in the config file points to a Nethermind `--datadir` that was synced on the Arbitrum network. The benchmarking tool creates a temporary overlay copy of this directory so the original data is never modified.
+The `snapshot_source` in the config file points to a synced Arbitrum data directory. The benchmarking tool creates a temporary overlay copy of this directory so the original data is never modified.
 
 Requirements:
 - The snapshot must contain chain state **at or before** the first payload's block, otherwise the execution client will reject the payloads.
 - The default snapshot backend is `overlay` (uses overlayfs). Alternatives are `zfs` and `copy` — see [USAGE.md](USAGE.md) for details.
 
-Example directory structure:
+The directory structure depends on which client you use:
+
+**`arbitrum-nethermind`** — standard Nethermind `--datadir`:
 
 ```
 ./snapshots/arbitrum-nethermind/
@@ -68,9 +70,20 @@ Example directory structure:
 └── ...
 ```
 
+**`arbitrum-nitro`** — Nitro `--persistent.global-config` directory:
+
+```
+./snapshots/arbitrum-nitro/
+├── nitro/
+├── l2chaindata/
+└── ...
+```
+
 ## Step 4: Create a Config File
 
-Create an `expb.yaml` with a minimal Arbitrum scenario. Only the fields shown below are required:
+Create an `expb.yaml` with a minimal Arbitrum scenario. Only the fields shown below are required.
+
+**Using `arbitrum-nethermind`** (Nethermind execution engine):
 
 ```yaml
 paths:
@@ -88,20 +101,48 @@ scenarios:
     startup_wait: 60
 ```
 
+**Using `arbitrum-nitro`** (official Nitro node in execution-only mode):
+
+```yaml
+paths:
+  work: ./work
+  outputs: ./outputs
+
+scenarios:
+  arbitrum-bench:
+    client: arbitrum-nitro
+    network: arbitrum
+    payloads: ./arbitrum-payloads/payloads.jsonl
+    snapshot_source: ./snapshots/arbitrum-nitro
+    amount: 1000
+    duration: 30m
+    startup_wait: 60
+```
+
 Key points:
-- **`client: arbitrum-nethermind`** — selects the Arbitrum-specific Nethermind configuration (uses `--config=arbitrum-mainnet` internally, disables JWT auth automatically)
+- **`client:`** — two Arbitrum clients are available:
+  - `arbitrum-nethermind` — Nethermind execution engine (`--config=arbitrum-mainnet`); snapshot is a Nethermind `--datadir`
+  - `arbitrum-nitro` — official Nitro node (`offchainlabs/nitro-node`) in execution-only mode (no L1 listener); snapshot is a Nitro `--persistent.global-config` directory
 - **`network: arbitrum`** — enables Arbitrum mode (no FCU file required, Arbitrum method handling)
 - **`fcus`** — omitted entirely (Arbitrum does not use forkchoice updates)
+- JWT auth is disabled automatically for both clients
 - **`amount`** — number of payloads to replay from the JSONL file
 - **`duration`** — maximum wall-clock time for the benchmark run
 - **`startup_wait`** — seconds to wait for the execution client to become ready
 
-Optional tuning flags can be added via `extra_flags`:
+Optional tuning flags can be added via `extra_flags` (flags are client-specific):
 
 ```yaml
+    # arbitrum-nethermind flags
     extra_flags:
       - --Pruning.Mode=None
       - --JsonRpc.Timeout=600000
+```
+
+```yaml
+    # arbitrum-nitro flags
+    extra_flags:
+      - --execution.caching.archive=true
 ```
 
 For all available scenario options, see the [example config](../example-expb.yaml) and [CLI usage docs](USAGE.md).
@@ -120,7 +161,7 @@ expb execute-scenario \
 
 What happens under the hood:
 1. A temporary overlay snapshot is created from `snapshot_source`
-2. An Arbitrum Nethermind Docker container starts with the snapshot mounted
+2. The selected Arbitrum Docker container starts with the snapshot mounted (Nethermind for `arbitrum-nethermind`, Nitro node for `arbitrum-nitro`)
 3. The tool waits for the JSON-RPC endpoint (port 8545) to become available
 4. Grafana K6 sends payloads from `payloads.jsonl` to the execution client
 5. After completion (or timeout), containers are stopped and logs are saved
@@ -137,15 +178,15 @@ After the scenario completes, outputs are saved to:
 ├── k6-config.json        # K6 script configuration
 ├── k6-summary.json       # K6 results summary (timings, status codes)
 ├── k6.log                # K6 process logs
-└── arbitrum-nethermind.log   # Execution client logs
+└── arbitrum-nethermind.log   # or arbitrum-nitro.log — Execution client logs
 ```
 
-Where `<outputs>` is the `paths.outputs` value from your config (`./outputs` by default).
+Where `<outputs>` is the `paths.outputs` value from your config (`./outputs` by default). The execution client log file is named after the client type (`arbitrum-nethermind.log` or `arbitrum-nitro.log`).
 
 **Key files to check:**
 
 - **`k6-summary.json`** — contains aggregate metrics: request durations (min/max/avg/p90/p95), success/failure counts, and throughput
-- **`arbitrum-nethermind.log`** — execution client logs for debugging errors or slow blocks
+- **`arbitrum-nethermind.log`** / **`arbitrum-nitro.log`** — execution client logs for debugging errors or slow blocks
 - **`k6.log`** — detailed K6 output including per-request timings
 
 **Per-payload metrics table** (when using `--per-payload-metrics-logs`):

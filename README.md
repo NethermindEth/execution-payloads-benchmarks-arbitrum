@@ -66,7 +66,7 @@ This produces `./arbitrum-payloads/payloads.jsonl` with one `digestMessage` call
 ```yaml
 scenarios:
   arbitrum-bench:
-    client: arbitrum-nethermind
+    client: arbitrum-nethermind   # or arbitrum-nitro
     network: arbitrum
     payloads: ./arbitrum-payloads/payloads.jsonl
     # fcus: omitted (not used for Arbitrum)
@@ -80,7 +80,10 @@ Key differences from Ethereum scenarios:
 
 * `network: arbitrum` — enables Arbitrum mode
 * `fcus` field is omitted (Arbitrum does not use forkchoice updates)
-* `client: arbitrum-nethermind` — uses Arbitrum-specific Nethermind configuration (JWT auth is disabled automatically)
+* `client:` — two Arbitrum clients are available:
+  * `arbitrum-nethermind` — runs the Nethermind execution engine with `--config=arbitrum-mainnet`; snapshot is a standard Nethermind datadir
+  * `arbitrum-nitro` — runs the official Nitro node (`offchainlabs/nitro-node`) in execution-only mode (no L1 listener); snapshot is a Nitro `--persistent.global-config` directory
+* JWT auth is disabled automatically for both Arbitrum clients
 
 #### 3. Run the benchmark
 

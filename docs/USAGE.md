@@ -181,7 +181,7 @@ Arbitrum scenarios use the same `execute-scenario` / `execute-scenarios` command
 ```yaml
 scenarios:
   arbitrum-bench:
-    client: arbitrum-nethermind    # Arbitrum-specific client config
+    client: arbitrum-nethermind    # or arbitrum-nitro
     network: arbitrum              # Enables Arbitrum mode
     payloads: ./payloads.jsonl     # Converted Arbitrum payloads
     # fcus: omitted               # Not used for Arbitrum
@@ -194,7 +194,10 @@ scenarios:
 
 * `network: arbitrum` — disables FCU requirement, uses Arbitrum method handling
 * `fcus` field can be omitted (Arbitrum does not use forkchoice updates)
-* `client: arbitrum-nethermind` — uses Arbitrum-specific Nethermind flags (`--config=arbitrum-mainnet`) with JWT auth disabled automatically
+* `client:` — two Arbitrum clients are available:
+  * `arbitrum-nethermind` — Nethermind execution engine with Arbitrum flags (`--config=arbitrum-mainnet`). Snapshot is a standard Nethermind `--datadir`.
+  * `arbitrum-nitro` — official Nitro node (`offchainlabs/nitro-node`) in execution-only mode (no L1 listener). Snapshot is a Nitro `--persistent.global-config` directory.
+* JWT auth is disabled automatically for both Arbitrum clients
 * Per-payload metrics report `msgDataSize` (base64-decoded L2 message data size) instead of `gasUsed`
 
 For a detailed end-to-end walkthrough, see the [Arbitrum Quickstart](QUICKSTART.md).

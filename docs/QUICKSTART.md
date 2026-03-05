@@ -31,7 +31,7 @@ expb convert-arbitrum-payloads \
   --input-dir ~/rpc \
   --output-dir ./arbitrum-payloads \
   --start-block 0 \
-  --end-block 99
+  --end-block 9999
 ```
 
 - `--input-dir` — directory containing the `rpc.<N>.txt` files
@@ -146,6 +146,8 @@ Optional tuning flags can be added via `extra_flags` (flags are client-specific)
 ```
 
 For all available scenario options, see the [example config](../example-expb.yaml) and [CLI usage docs](USAGE.md).
+
+## Step 4.1: Fix snapshot synchonisation issues
 
 ## Step 5: Run the Benchmark
 

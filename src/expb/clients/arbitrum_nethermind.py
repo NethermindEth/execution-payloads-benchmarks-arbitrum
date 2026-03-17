@@ -54,7 +54,7 @@ class ArbitrumNethermindConfig(ClientConfig):
         if network == Network.ARBITRUM:
             command.extend(
                 [
-                    "--config=arbitrum-mainnet",
+                    "--config=arbitrum-mainnet-archive",
                 ]
             )
         return self.default_command + command + extra_flags

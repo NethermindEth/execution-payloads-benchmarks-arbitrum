@@ -336,6 +336,146 @@ class Executor:
         )
         return container
 
+    # Chunked K6 Execution
+    def prepare_k6_chunk_files(self, chunk: dict) -> None:
+        """Extract lines from the master k6-payloads.jsonl into a chunk-specific file."""
+        chunk_index = chunk["chunk_index"]
+        warmup = chunk["warmup"]
+        amount = chunk["amount"]
+        source_offset = chunk["source_offset"]
+        is_first = chunk["is_first"]
+
+        # For the first chunk: copy lines [0, warmup + amount) (includes warmup prefix)
+        # For subsequent chunks: copy lines [source_offset, source_offset + amount)
+        if is_first:
+            start_line = 0
+            lines_to_copy = warmup + amount
+        else:
+            start_line = source_offset
+            lines_to_copy = amount
+
+        chunk_payloads_file = self.config.get_k6_chunk_payloads_file(chunk_index)
+        self.log.info(
+            "Preparing K6 chunk payloads",
+            chunk=chunk_index,
+            start_line=start_line,
+            lines_to_copy=lines_to_copy,
+        )
+        with open(self.config.k6_payloads_file, "r") as src, \
+             open(chunk_payloads_file, "w") as dst:
+            for i, line in enumerate(src):
+                if i < start_line:
+                    continue
+                if i >= start_line + lines_to_copy:
+                    break
+                dst.write(line)
+
+        # Also create chunk FCU file if FCUs are used
+        if self.config.send_fcu and self.config.fcus_file is not None:
+            skip = self.config.k6_payloads_skip or 0
+            if is_first:
+                fcu_start = skip
+                fcu_lines = warmup + amount
+            else:
+                fcu_start = skip + source_offset
+                fcu_lines = amount
+
+            chunk_fcus_file = self.config.get_k6_chunk_fcus_file(chunk_index)
+            with open(self.config.fcus_file, "r") as src, \
+                 open(chunk_fcus_file, "w") as dst:
+                for i, line in enumerate(src):
+                    if i < fcu_start:
+                        continue
+                    if i >= fcu_start + fcu_lines:
+                        break
+                    dst.write(line)
+
+    def prepare_k6_chunk_config(self, chunk: dict) -> None:
+        """Write a K6 config JSON for a specific chunk."""
+        chunk_index = chunk["chunk_index"]
+        k6_config = build_k6_script_config(
+            test_id=self.config.test_id,
+            scenario_name=self.config.executor_name,
+            client=self.config.execution_client,
+            iterations=chunk["amount"],
+            duration=self.config.k6_duration,
+            setup_timeout=self.config.k6_warmup_duration,
+        )
+        config_file = self.config.get_k6_chunk_config_file(chunk_index)
+        config_file.write_text(json.dumps(k6_config))
+
+    def run_k6_chunk(
+        self,
+        chunk: dict,
+        execution_client_engine_url: str,
+        container_network: Network | None = None,
+        collect_per_payload_metrics: bool = False,
+        enable_logging: bool = False,
+        per_payload_metrics_logs: bool = False,
+    ) -> Container:
+        chunk_index = chunk["chunk_index"]
+        k6_container_volumes = self.config.get_k6_volumes_for_chunk(chunk_index)
+        k6_container_command = self.config.get_k6_command_for_chunk(
+            chunk_index=chunk_index,
+            chunk_amount=chunk["amount"],
+            chunk_warmup=chunk["warmup"],
+            is_first=chunk["is_first"],
+            execution_client_engine_url=execution_client_engine_url,
+            collect_per_payload_metrics=collect_per_payload_metrics,
+            enable_logging=enable_logging,
+            per_payload_metrics_logs=per_payload_metrics_logs,
+        )
+        k6_container_environment = self.config.get_k6_environment()
+        container = self.config.docker_client.containers.run(
+            image=self.config.get_k6_container_image(),
+            name=self.config.get_k6_container_name_for_chunk(chunk_index),
+            volumes=k6_container_volumes,
+            environment=k6_container_environment,
+            command=k6_container_command,
+            network=container_network.name if container_network else None,
+            detach=False,
+            restart_policy={"Name": "unless-stopped"},
+            user=self.config.docker_user,
+            group_add=self.config.docker_group_add,
+            stop_signal="SIGINT",
+        )
+        return container
+
+    def save_k6_chunk_logs(
+        self,
+        chunk_index: int,
+        print_logs_to_console: bool = False,
+        per_payload_metrics_rows: list | None = None,
+    ) -> None:
+        """Save logs from a K6 chunk container and remove it."""
+        container_name = self.config.get_k6_container_name_for_chunk(chunk_index)
+        try:
+            k6_container = self.config.docker_client.containers.get(container_name)
+            logs_file = self.config.outputs_dir / f"k6-chunk-{chunk_index}.log"
+            self.log.info("Saving K6 chunk logs", chunk=chunk_index, logs_file=logs_file)
+            logs_stream = k6_container.logs(
+                stream=True,
+                follow=False,
+                stdout=True,
+                stderr=True,
+            )
+            with open(logs_file, "wb") as f:
+                for line in logs_stream:
+                    f.write(line)
+                    if per_payload_metrics_rows is not None:
+                        decoded_line = line.decode("utf-8", errors="replace")
+                        metric_row = self._parse_per_payload_metric_row(decoded_line)
+                        if metric_row is not None:
+                            per_payload_metrics_rows.append(metric_row)
+                    if print_logs_to_console:
+                        decoded_line = line.decode("utf-8", errors="replace")
+                        if not self._should_skip_console_k6_log_line(decoded_line):
+                            print(decoded_line, end="")
+            logs_stream.close()
+            k6_container.remove()
+        except docker.errors.NotFound:
+            self.log.warning("K6 chunk container not found for log collection", chunk=chunk_index)
+
     # Extra Commands Execution
     def _execute_single_command(
         self,
@@ -485,41 +625,29 @@ class Executor:
     def cleanup_scenario(
         self,
         print_logs_to_console: bool = False,
-        print_per_payload_metrics_table: bool = False,
     ) -> None:
         self.log.info("Cleaning up scenario", scenario=self.config.executor_name)
 
         # Stop all running extra commands first
         self.stop_extra_commands()
 
-        per_payload_metrics_rows: list[tuple[int, str, str]] = []
+        # Clean k6 chunk containers (safety net for error path)
+        for chunk in self.config.get_k6_chunks():
+            try:
+                name = self.config.get_k6_container_name_for_chunk(chunk["chunk_index"])
+                c = self.config.docker_client.containers.get(name)
+                c.stop()
+                c.remove()
+            except docker.errors.NotFound:
+                pass
 
-        # Clean k6 container
+        # Also try legacy single container name
         try:
-            k6_container = self.config.docker_client.containers.get(
+            c = self.config.docker_client.containers.get(
                 self.config.get_k6_container_name()
             )
-            k6_container.stop()
-            logs_file = self.config.outputs_dir / "k6.log"
-            self.log.info("Saving k6 logs", logs_file=logs_file)
-            logs_stream = k6_container.logs(
-                stream=True,
-                follow=False,
-                stdout=True,
-                stderr=True,
-            )
-            with open(logs_file, "wb") as f:
-                for line in logs_stream:
-                    f.write(line)
-                    decoded_line = line.decode("utf-8", errors="replace")
-                    metric_row = self._parse_per_payload_metric_row(decoded_line)
-                    if metric_row is not None:
-                        per_payload_metrics_rows.append(metric_row)
-                    if print_logs_to_console:
-                        if not self._should_skip_console_k6_log_line(decoded_line):
-                            print(decoded_line, end="")
-            logs_stream.close()
-            k6_container.remove()
+            c.stop()
+            c.remove()
         except docker.errors.NotFound:
             pass
 
@@ -558,9 +686,6 @@ class Executor:
                     )
         except docker.errors.NotFound:
             pass
-
-        if print_logs_to_console and print_per_payload_metrics_table:
-            self._print_per_payload_metrics_table(per_payload_metrics_rows)
 
         # Clean alloy container
         try:
@@ -700,10 +825,6 @@ class Executor:
             self.log.info("Preparing K6 script")
             self.prepare_k6_script()
 
-            self.log.info(
-                "Running K6",
-                k6_docker_image=self.config.get_k6_container_image(),
-            )
             if self.config.send_fcu:
                 execution_client_engine_url = (
                     self.config.get_execution_client_engine_url(
@@ -718,16 +839,47 @@ class Executor:
                         containers_network,
                     )
                 )
+
             enable_k6_logging = (
                 options.print_logs_to_console or options.per_payload_metrics_logs
             )
-            _ = self.run_k6(
-                execution_client_engine_url=execution_client_engine_url,
-                container_network=containers_network,
-                collect_per_payload_metrics=options.collect_per_payload_metrics,
-                enable_logging=enable_k6_logging,
-                per_payload_metrics_logs=options.per_payload_metrics_logs,
+
+            chunks = self.config.get_k6_chunks()
+            self.log.info(
+                "K6 execution plan",
+                total_chunks=len(chunks),
+                chunk_size=self.config.k6_chunk_size,
+                k6_docker_image=self.config.get_k6_container_image(),
             )
+
+            per_payload_metrics_rows: list[tuple[int, str, str]] = []
+
+            for chunk in chunks:
+                self.prepare_k6_chunk_files(chunk)
+                self.prepare_k6_chunk_config(chunk)
+
+                _ = self.run_k6_chunk(
+                    chunk=chunk,
+                    execution_client_engine_url=execution_client_engine_url,
+                    container_network=containers_network,
+                    collect_per_payload_metrics=options.collect_per_payload_metrics,
+                    enable_logging=enable_k6_logging,
+                    per_payload_metrics_logs=options.per_payload_metrics_logs,
+                )
+
+                self.save_k6_chunk_logs(
+                    chunk["chunk_index"],
+                    print_logs_to_console=enable_k6_logging,
+                    per_payload_metrics_rows=per_payload_metrics_rows,
+                )
+                self.log.info(
+                    "K6 chunk completed",
+                    chunk=chunk["chunk_index"],
+                    total=len(chunks),
+                )
+
+            if options.per_payload_metrics_logs:
+                self._print_per_payload_metrics_table(per_payload_metrics_rows)
 
             self.log.info(
                 "Payloads execution completed",
@@ -741,7 +893,6 @@ class Executor:
                 print_logs_to_console=(
                     options.print_logs_to_console or options.per_payload_metrics_logs
                 ),
-                print_per_payload_metrics_table=options.per_payload_metrics_logs,
             )
 
     @classmethod

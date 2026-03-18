@@ -83,6 +83,7 @@ class ExecutorConfig:
         self.k6_warmup_wait: int = scenario.warmup_wait
         self.k6_payloads_skip: int | None = scenario.payloads_skip
         self.k6_payloads_warmup: int | None = scenario.payloads_warmup
+        self.k6_chunk_size: int | None = scenario.chunk_size
 
         # Executor Directories
         ## Payloads and FCUs
@@ -401,5 +402,119 @@ class ExecutorConfig:
                 command.append(f"--tag={tag}")
         else:
             k6_results_jsonl_file = f"{self._k6_container_work_dir}/k6-results.jsonl"
+            command.append(f"--out=json={k6_results_jsonl_file}")
+        return command
+
+    ### K6 Chunking helpers
+    def get_k6_chunks(self) -> list[dict]:
+        """Return a list of chunk descriptors for splitting K6 execution."""
+        warmup = self.k6_payloads_warmup or 0
+        amount = self.k6_payloads_amount
+
+        if self.k6_chunk_size is None or amount <= self.k6_chunk_size:
+            return [{"chunk_index": 0, "warmup": warmup, "amount": amount,
+                     "source_offset": 0, "is_first": True, "is_last": True}]
+
+        chunks = []
+        remaining = amount
+        source_offset = warmup  # first chunk starts after warmup lines in master file
+        for i in range(0, amount, self.k6_chunk_size):
+            chunk_amount = min(self.k6_chunk_size, remaining)
+            chunks.append({
+                "chunk_index": len(chunks),
+                "warmup": warmup if len(chunks) == 0 else 0,
+                "amount": chunk_amount,
+                "source_offset": source_offset,
+                "is_first": len(chunks) == 0,
+                "is_last": remaining - chunk_amount <= 0,
+            })
+            source_offset += chunk_amount
+            remaining -= chunk_amount
+        return chunks
+
+    def get_k6_container_name_for_chunk(self, chunk_index: int) -> str:
+        return self.get_container_name(f"k6-chunk-{chunk_index}")
+
+    def get_k6_chunk_payloads_file(self, chunk_index: int) -> Path:
+        return self.outputs_dir / f"k6-payloads-chunk-{chunk_index}.jsonl"
+
+    def get_k6_chunk_fcus_file(self, chunk_index: int) -> Path:
+        return self.outputs_dir / f"k6-fcus-chunk-{chunk_index}.jsonl"
+
+    def get_k6_chunk_config_file(self, chunk_index: int) -> Path:
+        return self.outputs_dir / f"k6-config-chunk-{chunk_index}.json"
+
+    def get_k6_chunk_summary_container_path(self, chunk_index: int) -> str:
+        return f"{self._k6_container_work_dir}/k6-summary-chunk-{chunk_index}.json"
+
+    def get_k6_volumes_for_chunk(self, chunk_index: int) -> dict[str, dict[str, str]]:
+        chunk_payloads_file = self.get_k6_chunk_payloads_file(chunk_index)
+        volumes = {
+            str(chunk_payloads_file.resolve()): {
+                "bind": self._k6_container_payloads_file,
+                "mode": "rw",
+            },
+            str(self.outputs_dir.resolve()): {
+                "bind": self._k6_container_work_dir,
+                "mode": "rw",
+            },
+        }
+        if self.send_fcu and self._k6_container_fcus_file is not None:
+            chunk_fcus_file = self.get_k6_chunk_fcus_file(chunk_index)
+            volumes[str(chunk_fcus_file.resolve())] = {
+                "bind": self._k6_container_fcus_file,
+                "mode": "rw",
+            }
+        if not self.disable_auth and self._k6_container_jwt_secret_file is not None:
+            volumes[str(self.jwt_secret_file.resolve())] = {
+                "bind": self._k6_container_jwt_secret_file,
+                "mode": "rw",
+            }
+        return volumes
+
+    def get_k6_command_for_chunk(
+        self,
+        chunk_index: int,
+        chunk_amount: int,
+        chunk_warmup: int,
+        is_first: bool,
+        execution_client_engine_url: str,
+        collect_per_payload_metrics: bool,
+        enable_logging: bool,
+        per_payload_metrics_logs: bool,
+    ) -> list[str]:
+        chunk_config_file = f"{self._k6_container_work_dir}/k6-config-chunk-{chunk_index}.json"
+        chunk_summary_file = self.get_k6_chunk_summary_container_path(chunk_index)
+        command = [
+            "run",
+            self._k6_container_script_file,
+            "--summary-mode=full",
+            f"--summary-export={chunk_summary_file}",
+            f"--tag=testid={self.test_id}",
+            f"--tag=chunk={chunk_index}",
+            f"--env=EXPB_CONFIG_FILE_PATH={chunk_config_file}",
+            f"--env=EXPB_PAYLOADS_FILE_PATH={self._k6_container_payloads_file}",
+            f"--env=EXPB_PAYLOADS_DELAY={self.k6_payloads_delay}",
+            f"--env=EXPB_PAYLOADS_WARMUP_DELAY={self.k6_payloads_warmup_delay or 0}",
+            f"--env=EXPB_PAYLOADS_SKIP=0",
+            f"--env=EXPB_PAYLOADS_WARMUP={chunk_warmup}",
+            f"--env=EXPB_ENGINE_ENDPOINT={execution_client_engine_url}",
+            f"--env=EXPB_PER_PAYLOAD_METRICS={int(collect_per_payload_metrics)}",
+            f"--env=EXPB_ENABLE_LOGGING={int(enable_logging)}",
+            f"--env=EXPB_PER_PAYLOAD_METRICS_LOGS={int(per_payload_metrics_logs)}",
+            f"--env=EXPB_WARMUP_WAIT={self.k6_warmup_wait if is_first else 0}",
+            f"--env=EXPB_SEND_FCU={int(self.send_fcu)}",
+            f"--env=EXPB_USE_JWT={int(not self.disable_auth)}",
+        ]
+        if self._k6_container_fcus_file is not None:
+            command.append(f"--env=EXPB_FCUS_FILE_PATH={self._k6_container_fcus_file}")
+        if self._k6_container_jwt_secret_file is not None:
+            command.append(f"--env=EXPB_JWTSECRET_FILE_PATH={self._k6_container_jwt_secret_file}")
+        if self.exports is not None and self.exports.prometheus_rw is not None:
+            command.append("--out=experimental-prometheus-rw")
+            for tag in self.exports.prometheus_rw.tags:
+                command.append(f"--tag={tag}")
+        else:
+            k6_results_jsonl_file = f"{self._k6_container_work_dir}/k6-results-chunk-{chunk_index}.jsonl"
             command.append(f"--out=json={k6_results_jsonl_file}")
         return command

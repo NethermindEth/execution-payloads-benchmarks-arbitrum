@@ -862,6 +862,15 @@ class Executor:
                 self.prepare_k6_chunk_files(chunk)
                 self.prepare_k6_chunk_config(chunk)
 
+                self.log.info(
+                    "Running K6 chunk",
+                    chunk=chunk["chunk_index"] + 1,
+                    total=len(chunks),
+                    amount=chunk["amount"],
+                    warmup=chunk["warmup"],
+                    container=self.config.get_k6_container_name_for_chunk(chunk["chunk_index"]),
+                )
+
                 _ = self.run_k6_chunk(
                     chunk=chunk,
                     execution_client_engine_url=execution_client_engine_url,
@@ -878,7 +887,7 @@ class Executor:
                 )
                 self.log.info(
                     "K6 chunk completed",
-                    chunk=chunk["chunk_index"],
+                    chunk=chunk["chunk_index"] + 1,
                     total=len(chunks),
                 )
 

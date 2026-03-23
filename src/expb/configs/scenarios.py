@@ -108,7 +108,7 @@ class Scenario(BaseModel):
     chunk_size: int | None = Field(
         description="Number of payloads per K6 chunk. Splits large payloads across multiple K6 runs to avoid OOM.",
         alias="chunk_size",
-        default=None,
+        default=100000,
         ge=1,
     )
     payloads_delay: float = Field(

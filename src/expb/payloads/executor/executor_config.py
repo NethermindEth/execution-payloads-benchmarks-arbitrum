@@ -491,7 +491,6 @@ class ExecutorConfig:
             "--summary-mode=full",
             f"--summary-export={chunk_summary_file}",
             f"--tag=testid={self.test_id}",
-            f"--tag=chunk={chunk_index}",
             f"--env=EXPB_CONFIG_FILE_PATH={chunk_config_file}",
             f"--env=EXPB_PAYLOADS_FILE_PATH={self._k6_container_payloads_file}",
             f"--env=EXPB_PAYLOADS_DELAY={self.k6_payloads_delay}",

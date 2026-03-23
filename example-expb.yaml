@@ -79,6 +79,9 @@ scenarios:
     skip: 0
     # Optional: Number of payloads to execute as warmup(no metrics will be collected for those)
     warmup: 0
+    # Optional: Split large payloads across multiple K6 runs to avoid OOM.
+    # Each K6 container processes chunk_size payloads. Useful when amount is very large (e.g. 1M+).
+    # chunk_size: 100000
     # Optional: Wait time for client startup in seconds. Defaults to 30 seconds.
     startup_wait: 30
     # Optional: Wait time between warmup and benchmark requests in seconds. Defaults to 0 seconds.

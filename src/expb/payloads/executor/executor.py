@@ -480,6 +480,67 @@ class Executor:
         except docker.errors.NotFound:
             self.log.warning("K6 chunk container not found for log collection", chunk=chunk_index)
 
+    # Chunk output merging
+    def _merge_k6_chunk_outputs(self, num_chunks: int) -> None:
+        """Merge per-chunk K6 outputs into single files and clean up chunk artifacts."""
+        self.log.info("Merging K6 chunk outputs", num_chunks=num_chunks)
+
+        # Merge logs
+        merged_log = self.config.outputs_dir / "k6.log"
+        with open(merged_log, "wb") as dst:
+            for i in range(num_chunks):
+                chunk_log = self.config.outputs_dir / f"k6-chunk-{i}.log"
+                if chunk_log.exists():
+                    with open(chunk_log, "rb") as src:
+                        for line in src:
+                            dst.write(line)
+                    chunk_log.unlink()
+
+        # Merge results JSONL (only exists when not using Prometheus RW)
+        merged_results = self.config.outputs_dir / "k6-results.jsonl"
+        has_results = False
+        for i in range(num_chunks):
+            chunk_file = self.config.outputs_dir / f"k6-results-chunk-{i}.jsonl"
+            if chunk_file.exists():
+                has_results = True
+                break
+        if has_results:
+            with open(merged_results, "wb") as dst:
+                for i in range(num_chunks):
+                    chunk_file = self.config.outputs_dir / f"k6-results-chunk-{i}.jsonl"
+                    if chunk_file.exists():
+                        with open(chunk_file, "rb") as src:
+                            for line in src:
+                                dst.write(line)
+                        chunk_file.unlink()
+
+        # Merge summary JSONs into array
+        summaries = []
+        for i in range(num_chunks):
+            chunk_file = self.config.outputs_dir / f"k6-summary-chunk-{i}.json"
+            if chunk_file.exists():
+                try:
+                    summaries.append(json.loads(chunk_file.read_text()))
+                except json.JSONDecodeError:
+                    pass
+                chunk_file.unlink()
+        if summaries:
+            merged_summary = self.config.outputs_dir / "k6-summary.json"
+            merged_summary.write_text(json.dumps(summaries, indent=2))
+
+        # Clean up per-chunk config and payload files
+        for i in range(num_chunks):
+            for pattern in [
+                f"k6-config-chunk-{i}.json",
+                f"k6-payloads-chunk-{i}.jsonl",
+                f"k6-fcus-chunk-{i}.jsonl",
+            ]:
+                f = self.config.outputs_dir / pattern
+                if f.exists():
+                    f.unlink()
+
+        self.log.info("K6 chunk outputs merged")
+
     # Extra Commands Execution
     def _execute_single_command(
         self,
@@ -856,12 +917,15 @@ class Executor:
                 k6_docker_image=self.config.get_k6_container_image(),
             )
 
-            per_payload_metrics_rows: list[tuple[int, str, str]] = []
-
+            # Pre-generate all chunk files upfront to minimize gaps between chunks
             for chunk in chunks:
                 self.prepare_k6_chunk_files(chunk)
                 self.prepare_k6_chunk_config(chunk)
+            self.log.info("All K6 chunk files prepared", total_chunks=len(chunks))
 
+            per_payload_metrics_rows: list[tuple[int, str, str]] = []
+
+            for chunk in chunks:
                 self.log.info(
                     "Running K6 chunk",
                     chunk=chunk["chunk_index"] + 1,
@@ -890,6 +954,9 @@ class Executor:
                     chunk=chunk["chunk_index"] + 1,
                     total=len(chunks),
                 )
+
+            if len(chunks) > 1:
+                self._merge_k6_chunk_outputs(len(chunks))
 
             if options.per_payload_metrics_logs:
                 self._print_per_payload_metrics_table(per_payload_metrics_rows)

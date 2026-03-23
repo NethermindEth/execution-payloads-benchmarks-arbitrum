@@ -472,7 +472,11 @@ class Executor:
                         if not self._should_skip_console_k6_log_line(decoded_line):
                             print(decoded_line, end="")
             logs_stream.close()
-            k6_container.remove()
+            try:
+                k6_container.stop()
+            except docker.errors.APIError:
+                pass
+            k6_container.remove(force=True)
         except docker.errors.NotFound:
             self.log.warning("K6 chunk container not found for log collection", chunk=chunk_index)
 

@@ -420,6 +420,7 @@ class Executor:
             chunk_amount=chunk["amount"],
             chunk_warmup=chunk["warmup"],
             is_first=chunk["is_first"],
+            is_last=chunk["is_last"],
             execution_client_engine_url=execution_client_engine_url,
             collect_per_payload_metrics=collect_per_payload_metrics,
             enable_logging=enable_logging,
@@ -481,6 +482,91 @@ class Executor:
             self.log.warning("K6 chunk container not found for log collection", chunk=chunk_index)
 
     # Chunk output merging
+    # Trend metric keys that have avg/min/med/max/p(90)/p(95)/p(99)
+    _TREND_STAT_KEYS = ["avg", "min", "med", "max", "p(90)", "p(95)", "p(99)"]
+    # Counter metric keys that have count/rate
+    _COUNTER_KEYS = ["count", "rate"]
+
+    @staticmethod
+    def _aggregate_summaries(summaries: list[dict]) -> dict:
+        """Aggregate multiple K6 summary JSONs into a single summary."""
+        if len(summaries) == 1:
+            return summaries[0]
+
+        # Use last chunk as template
+        merged = json.loads(json.dumps(summaries[-1]))
+        all_metrics = {}
+
+        # Collect all metric names across chunks
+        for s in summaries:
+            if "metrics" in s:
+                for key in s["metrics"]:
+                    all_metrics[key] = True
+
+        for metric_name in all_metrics:
+            chunk_values = []
+            for s in summaries:
+                if "metrics" in s and metric_name in s["metrics"]:
+                    chunk_values.append(s["metrics"][metric_name])
+
+            if not chunk_values:
+                continue
+
+            # Detect metric type by checking which keys exist
+            sample = chunk_values[0]
+            is_trend = "avg" in sample
+            is_counter = "count" in sample and "avg" not in sample
+
+            if is_trend:
+                aggregated = {}
+                for stat in Executor._TREND_STAT_KEYS:
+                    values = [cv[stat] for cv in chunk_values if stat in cv]
+                    if not values:
+                        continue
+                    if stat == "min":
+                        aggregated[stat] = min(values)
+                    elif stat == "max":
+                        aggregated[stat] = max(values)
+                    else:
+                        # avg, med, p(90), p(95), p(99): mean across chunks
+                        aggregated[stat] = sum(values) / len(values)
+                merged["metrics"][metric_name] = aggregated
+
+            elif is_counter:
+                total_count = sum(cv.get("count", 0) for cv in chunk_values)
+                total_rate = sum(cv.get("rate", 0) for cv in chunk_values)
+                merged["metrics"][metric_name] = {
+                    "count": total_count,
+                    "rate": total_rate / len(chunk_values),
+                }
+
+        return merged
+
+    def _print_aggregated_report(self, summary: dict, num_chunks: int) -> None:
+        """Print aggregated K6 results to console."""
+        metrics = summary.get("metrics", {})
+        duration = metrics.get("http_req_duration", {})
+        iterations = metrics.get("iterations", {})
+
+        def fmt_ms(val: float) -> str:
+            if val < 1:
+                return f"{val * 1000:.0f}us"
+            elif val < 1000:
+                return f"{val:.2f}ms"
+            else:
+                return f"{val / 1000:.2f}s"
+
+        print(f"\n=== Aggregated K6 Results ({num_chunks} chunks) ===")
+        if duration:
+            parts = []
+            for stat in ["avg", "min", "med", "max", "p(90)", "p(95)", "p(99)"]:
+                if stat in duration:
+                    parts.append(f"{stat}={fmt_ms(duration[stat])}")
+            print(f"http_req_duration: {' '.join(parts)}")
+        if iterations:
+            print(f"iterations: {int(iterations.get('count', 0))}")
+        print()
+
     def _merge_k6_chunk_outputs(self, num_chunks: int) -> None:
         """Merge per-chunk K6 outputs into single files and clean up chunk artifacts."""
         self.log.info("Merging K6 chunk outputs", num_chunks=num_chunks)
@@ -497,7 +583,6 @@ class Executor:
                     chunk_log.unlink()
 
         # Merge results JSONL (only exists when not using Prometheus RW)
-        merged_results = self.config.outputs_dir / "k6-results.jsonl"
         has_results = False
         for i in range(num_chunks):
             chunk_file = self.config.outputs_dir / f"k6-results-chunk-{i}.jsonl"
@@ -505,6 +590,7 @@ class Executor:
                 has_results = True
                 break
         if has_results:
+            merged_results = self.config.outputs_dir / "k6-results.jsonl"
             with open(merged_results, "wb") as dst:
                 for i in range(num_chunks):
                     chunk_file = self.config.outputs_dir / f"k6-results-chunk-{i}.jsonl"
@@ -514,7 +600,7 @@ class Executor:
                                 dst.write(line)
                         chunk_file.unlink()
 
-        # Merge summary JSONs into array
+        # Aggregate summary JSONs into single merged summary
         summaries = []
         for i in range(num_chunks):
             chunk_file = self.config.outputs_dir / f"k6-summary-chunk-{i}.json"
@@ -525,8 +611,11 @@ class Executor:
                     pass
                 chunk_file.unlink()
         if summaries:
+            aggregated = self._aggregate_summaries(summaries)
             merged_summary = self.config.outputs_dir / "k6-summary.json"
-            merged_summary.write_text(json.dumps(summaries, indent=2))
+            merged_summary.write_text(json.dumps(aggregated, indent=2))
+            if num_chunks > 1:
+                self._print_aggregated_report(aggregated, num_chunks)
 
         # Clean up per-chunk config and payload files
         for i in range(num_chunks):
@@ -955,8 +1044,7 @@ class Executor:
                     total=len(chunks),
                 )
 
-            if len(chunks) > 1:
-                self._merge_k6_chunk_outputs(len(chunks))
+            self._merge_k6_chunk_outputs(len(chunks))
 
             if options.per_payload_metrics_logs:
                 self._print_per_payload_metrics_table(per_payload_metrics_rows)

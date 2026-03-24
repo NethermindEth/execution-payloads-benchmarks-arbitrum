@@ -478,6 +478,7 @@ class ExecutorConfig:
         chunk_amount: int,
         chunk_warmup: int,
         is_first: bool,
+        is_last: bool,
         execution_client_engine_url: str,
         collect_per_payload_metrics: bool,
         enable_logging: bool,
@@ -485,10 +486,12 @@ class ExecutorConfig:
     ) -> list[str]:
         chunk_config_file = f"{self._k6_container_work_dir}/k6-config-chunk-{chunk_index}.json"
         chunk_summary_file = self.get_k6_chunk_summary_container_path(chunk_index)
+        # Use compact summary for non-last chunks (still exports summary JSON, but minimal console output)
+        summary_mode = "full" if is_last else "compact"
         command = [
             "run",
             self._k6_container_script_file,
-            "--summary-mode=full",
+            f"--summary-mode={summary_mode}",
             f"--summary-export={chunk_summary_file}",
             f"--tag=testid={self.test_id}",
             f"--env=EXPB_CONFIG_FILE_PATH={chunk_config_file}",

@@ -27,6 +27,7 @@ from expb.payloads.executor.services.k6 import (
 )
 from expb.payloads.executor.services.snapshots import setup_snapshot_service
 from expb.payloads.utils.networking import limit_container_bandwidth
+from expb.payloads.utils.prometheus_rw import push_metrics
 
 PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
     r'EXPB_PER_PAYLOAD_METRIC idx=(?P<idx>\d+) gas_used=(?P<gas_used>[^"\s]+) processing_ms=(?P<processing_ms>[^"\s]+)'
@@ -567,6 +568,71 @@ class Executor:
             print(f"iterations: {int(iterations.get('count', 0))}")
         print()
 
+    def _push_aggregated_metrics_to_prometheus(self, summary: dict) -> None:
+        """Push aggregated chunk metrics to Prometheus so Grafana shows correct values."""
+        if self.config.exports is None or self.config.exports.prometheus_rw is None:
+            return
+
+        prom_config = self.config.exports.prometheus_rw
+        metrics_to_push = {}
+
+        # Build metrics from aggregated summary
+        # Trend metrics: push each stat as a separate metric (matching K6's naming convention)
+        trend_metric_names = [
+            "http_req_duration", "http_req_waiting", "http_req_sending",
+            "http_req_receiving", "http_req_blocked", "http_req_connecting",
+            "iteration_duration",
+        ]
+        stat_suffixes = {
+            "avg": "_avg", "min": "_min", "med": "_med", "max": "_max",
+            "p(90)": "_p90", "p(95)": "_p95", "p(99)": "_p99",
+        }
+
+        all_metrics = summary.get("metrics", {})
+        for metric_name in trend_metric_names:
+            metric_data = all_metrics.get(metric_name, {})
+            for stat_key, suffix in stat_suffixes.items():
+                if stat_key in metric_data:
+                    prom_name = f"k6_{metric_name}{suffix}"
+                    metrics_to_push[prom_name] = metric_data[stat_key]
+
+        # Counter metrics: push total count
+        for counter_name in ["iterations", "http_reqs"]:
+            counter_data = all_metrics.get(counter_name, {})
+            if "count" in counter_data:
+                metrics_to_push[f"k6_{counter_name}_total"] = float(counter_data["count"])
+
+        if not metrics_to_push:
+            return
+
+        # Build labels matching what K6 uses
+        labels = {"testid": self.config.test_id}
+        # Add the same extra tags K6 uses
+        extra_tags = prom_config.tags if prom_config.tags else None
+
+        basic_auth = None
+        if prom_config.basic_auth:
+            basic_auth = (prom_config.basic_auth.username, prom_config.basic_auth.password)
+
+        self.log.info(
+            "Pushing aggregated metrics to Prometheus",
+            endpoint=prom_config.endpoint,
+            num_metrics=len(metrics_to_push),
+        )
+
+        success = push_metrics(
+            endpoint=prom_config.endpoint,
+            metrics=metrics_to_push,
+            labels=labels,
+            basic_auth=basic_auth,
+            extra_tags=extra_tags,
+        )
+
+        if success:
+            self.log.info("Aggregated metrics pushed to Prometheus")
+        else:
+            self.log.warning("Failed to push aggregated metrics to Prometheus")
+
     def _merge_k6_chunk_outputs(self, num_chunks: int) -> None:
         """Merge per-chunk K6 outputs into single files and clean up chunk artifacts."""
         self.log.info("Merging K6 chunk outputs", num_chunks=num_chunks)
@@ -616,6 +682,7 @@ class Executor:
             merged_summary.write_text(json.dumps(aggregated, indent=2))
             if num_chunks > 1:
                 self._print_aggregated_report(aggregated, num_chunks)
+                self._push_aggregated_metrics_to_prometheus(aggregated)
 
         # Clean up per-chunk config and payload files
         for i in range(num_chunks):

@@ -594,9 +594,10 @@ class Executor:
             for stat_key, suffix in stat_suffixes.items():
                 if stat_key in metric_data:
                     prom_name = f"k6_{metric_name}{suffix}"
-                    metrics_to_push[prom_name] = metric_data[stat_key]
+                    # K6 summary stores durations in ms; Prometheus RW expects seconds
+                    metrics_to_push[prom_name] = metric_data[stat_key] / 1000.0
 
-        # Counter metrics: push total count
+        # Counter metrics: push total count (no unit conversion — these are counts)
         for counter_name in ["iterations", "http_reqs"]:
             counter_data = all_metrics.get(counter_name, {})
             if "count" in counter_data:
@@ -605,8 +606,19 @@ class Executor:
         if not metrics_to_push:
             return
 
-        # Build labels matching what K6 uses
-        labels = {"testid": self.config.test_id}
+        # Build labels matching what K6 uses in Prometheus
+        labels = {
+            "testid": self.config.test_id,
+            "client_type": f"{self.config.get_execution_client_name()}-agg",
+        }
+
+        # Extract jrpc_method from summary root_group
+        root_group = summary.get("root_group", {})
+        groups = root_group.get("groups", {})
+        if groups:
+            method_name = next(iter(groups.keys()))
+            labels["jrpc_method"] = method_name
+
         # Add the same extra tags K6 uses
         extra_tags = prom_config.tags if prom_config.tags else None
 
